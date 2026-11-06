@@ -27,7 +27,7 @@ export const onboardingDone = () => {
   return !!(p.individual && p.relacion && p.objetivos && p.privacidad);
 };
 export async function aiStatus(force) {
-  if (S.ai && !force) return S.ai;
+  if (S.ai?.ai && !force) return S.ai; // si no estaba activo, se vuelve a comprobar siempre
   try { S.ai = await db.fn('status'); } catch { S.ai = { error: 'fn_unreachable' }; }
   return S.ai;
 }
