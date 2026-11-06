@@ -12,13 +12,24 @@ const SB_SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 //  · ANTHROPIC_API_KEY  (de pago)            · modelo: OS_MODEL        (por defecto claude-sonnet-5-5)
 //  · GEMINI_API_KEY     (gratis, Google)      · modelo: GEMINI_MODEL    (por defecto gemini-flash-latest)
 //  · GROQ_API_KEY       (gratis, Groq)        · modelo: GROQ_MODEL      (por defecto openai/gpt-oss-120b)
-const PROVIDERS = [
+const ENV_PROVIDERS = [
   { id: "anthropic", key: Deno.env.get("ANTHROPIC_API_KEY") || "", model: Deno.env.get("OS_MODEL") || "claude-sonnet-5-5" },
-  { id: "gemini", key: Deno.env.get("GEMINI_API_KEY") || "", model: Deno.env.get("GEMINI_MODEL") || "gemini-flash-latest" },
+  { id: "gemini", key: Deno.env.get("GEMINI_API_KEY") || "", model: Deno.env.get("GEMINI_MODEL") || "gemini-3.8-flash,gemini-3.6-flash,gemini-flash-latest,gemini-flash-lite-latest" },
   { id: "groq", key: Deno.env.get("GROQ_API_KEY") || "", model: Deno.env.get("GROQ_MODEL") || "openai/gpt-oss-120b" },
-].filter((p) => p.key);
-const AI_KEY = PROVIDERS.length ? "on" : "";
-const MODEL = PROVIDERS.map((p) => `${p.id}:${p.model}`).join(" → ");
+];
+// Las claves también pueden vivir cifradas en Supabase Vault (os_gemini_api_key, os_groq_api_key, os_anthropic_api_key),
+// leídas con la función os_ai_keys(), que solo puede ejecutar el servidor (service_role).
+let PROVIDERS: { id: string; key: string; model: string }[] = [];
+let AI_KEY = "", MODEL = "", loadedAt = 0;
+async function loadProviders(admin: any) {
+  if (Date.now() - loadedAt < 60_000) return;
+  let vault: Record<string, string> = {};
+  try { const { data } = await admin.rpc("os_ai_keys"); vault = data || {}; } catch (e) { console.error("vault", e); }
+  PROVIDERS = ENV_PROVIDERS.map((p) => ({ ...p, key: p.key || vault[`os_${p.id}_api_key`] || "" })).filter((p) => p.key);
+  AI_KEY = PROVIDERS.length ? "on" : "";
+  MODEL = PROVIDERS.map((p) => `${p.id}:${p.model.split(",")[0]}`).join(" → ");
+  loadedAt = Date.now();
+}
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -100,22 +111,26 @@ async function callOne(p: any, system: string, messages: { role: string; content
     return (d.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n").trim();
   }
   if (p.id === "gemini") {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(p.model)}:generateContent`, {
-      method: "POST",
-      headers: { "x-goog-api-key": p.key, "content-type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
-        generationConfig: { maxOutputTokens: Math.max(maxTokens, 2048) * 2, temperature: 0.6, ...(json ? { responseMimeType: "application/json" } : {}) },
-      }),
-    });
-    if (!r.ok) throw new Error(`gemini ${r.status}: ${(await r.text()).slice(0, 300)}`);
-    const d = await r.json();
-    const text = (d.candidates?.[0]?.content?.parts || []).filter((x: any) => !x.thought).map((x: any) => x.text || "").join("").trim();
-    if (!text) throw new Error(`gemini empty: ${JSON.stringify(d.promptFeedback || d.candidates?.[0]?.finishReason || "")}`);
-    return text;
+    // varios modelos en orden: si uno está saturado (503/429) o no existe (404), se prueba el siguiente
+    let lastErr = "";
+    for (const model of p.model.split(",").map((m: string) => m.trim()).filter(Boolean)) {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: "POST",
+        headers: { "x-goog-api-key": p.key, "content-type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
+          generationConfig: { maxOutputTokens: Math.max(maxTokens, 2048) * 4, temperature: 0.6, ...(json ? { responseMimeType: "application/json" } : {}) },
+        }),
+      });
+      if (!r.ok) { lastErr = `gemini ${model} ${r.status}: ${(await r.text()).slice(0, 200)}`; console.error(lastErr); if ([429, 500, 503, 404].includes(r.status)) continue; throw new Error(lastErr); }
+      const d = await r.json();
+      const text = (d.candidates?.[0]?.content?.parts || []).filter((x: any) => !x.thought).map((x: any) => x.text || "").join("").trim();
+      if (text) return text;
+      lastErr = `gemini ${model} empty: ${JSON.stringify(d.promptFeedback || d.candidates?.[0]?.finishReason || "")}`; console.error(lastErr);
+    }
+    throw new Error(lastErr || "gemini_failed");
   }
-  // groq (API compatible con OpenAI)
   const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${p.key}`, "content-type": "application/json" },
@@ -218,6 +233,7 @@ Deno.serve(async (req) => {
   const { data: { user } } = await userClient.auth.getUser();
   if (!user) return json({ error: "not_authenticated" }, 401);
   const admin = createClient(SB_URL, SB_SERVICE);
+  await loadProviders(admin);
 
   let body: any = {};
   try { body = await req.json(); } catch { return json({ error: "bad_json" }, 400); }
