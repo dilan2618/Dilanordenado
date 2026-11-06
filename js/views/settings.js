@@ -36,7 +36,7 @@ export default async function (el) {
       <p class="small muted">Para compartir secciones de tus respuestas con tu pareja, ve a <a href="#/conocernos">Conocernos → Mis respuestas</a>. Tus conversaciones “A solas” y “Analizar” son siempre privadas.</p></div></section>
 
     <section class="card" style="margin-top:16px"><div class="card-head"><h3>Asistente</h3><span class="badge ${ai?.ai ? 'ok' : 'warn'}">${ai?.ai ? 'Activo' : ai?.error === 'fn_unreachable' ? 'No disponible' : 'Sin activar'}</span></div>
-      <p class="small">${ai?.ai ? `Conectado al modelo ${esc(ai.model || '')}. Las conversaciones se procesan en el servidor; la clave nunca está en tu teléfono.` : 'Falta configurar la clave de IA en el servidor (Supabase → Edge Functions → Secrets → ANTHROPIC_API_KEY). Todo lo demás funciona normalmente.'}</p></section>
+      <p class="small">${ai?.ai ? `Conectado a: ${esc(ai.model || '')}. Las conversaciones se procesan en el servidor; la clave nunca está en tu teléfono.` : 'Falta configurar una clave de IA en el servidor (Supabase → Edge Functions → Secrets): GEMINI_API_KEY o GROQ_API_KEY (gratis) o ANTHROPIC_API_KEY. Todo lo demás funciona normalmente.'}</p></section>
 
     <section class="card" style="margin-top:16px"><div class="card-head"><h3>Tus datos</h3></div><div class="stack">
       <button class="btn ghost" id="imp">${icon('upload')} Traer recuerdos de Nuestro Rincón</button>

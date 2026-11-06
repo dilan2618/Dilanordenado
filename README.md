@@ -33,7 +33,7 @@ Un espacio seguro para comprender, cuidar y construir una relación.
 ## Puesta en marcha
 
 1. **Base de datos**: ✅ ya aplicada en el proyecto `dilex` (archivo `supabase/migrations/001_ourspace.sql`).
-2. **Asistente**: ✅ función `os-assistant` ya desplegada. Falta añadir el secreto `ANTHROPIC_API_KEY`
+2. **Asistente**: ✅ función `os-assistant` ya desplegada. Falta añadir una clave: `GEMINI_API_KEY` (gratis, aistudio.google.com), `GROQ_API_KEY` (gratis, console.groq.com) o el secreto `ANTHROPIC_API_KEY`
    en Supabase → Edge Functions → Secrets. Opcional: `OS_MODEL` (por defecto `claude-sonnet-5-5`).
    Sin la clave, todo funciona menos las respuestas de IA, y la app lo indica claramente.
 3. **Correo de confirmación**: en Supabase → Authentication → URL Configuration, poner la URL de Netlify

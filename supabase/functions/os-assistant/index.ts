@@ -1,16 +1,24 @@
 // =====================================================================
 // OUR SPACE · Asistente de acompañamiento (Supabase Edge Function)
 // Acciones: status · chat · conflict · profile · activities · delete_account
-// La clave de IA vive SOLO aquí, como secreto: ANTHROPIC_API_KEY
-// Modelo configurable con el secreto OS_MODEL (por defecto claude-sonnet-5-5)
+// Las claves de IA viven SOLO aquí, como secretos (ver PROVIDERS más abajo)
 // =====================================================================
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const SB_ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SB_SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const AI_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
-const MODEL = Deno.env.get("OS_MODEL") || "claude-sonnet-5-5";
+// Proveedores de IA (se usa el primero configurado; si falla, se intenta el siguiente)
+//  · ANTHROPIC_API_KEY  (de pago)            · modelo: OS_MODEL        (por defecto claude-sonnet-5-5)
+//  · GEMINI_API_KEY     (gratis, Google)      · modelo: GEMINI_MODEL    (por defecto gemini-flash-latest)
+//  · GROQ_API_KEY       (gratis, Groq)        · modelo: GROQ_MODEL      (por defecto openai/gpt-oss-120b)
+const PROVIDERS = [
+  { id: "anthropic", key: Deno.env.get("ANTHROPIC_API_KEY") || "", model: Deno.env.get("OS_MODEL") || "claude-sonnet-5-5" },
+  { id: "gemini", key: Deno.env.get("GEMINI_API_KEY") || "", model: Deno.env.get("GEMINI_MODEL") || "gemini-flash-latest" },
+  { id: "groq", key: Deno.env.get("GROQ_API_KEY") || "", model: Deno.env.get("GROQ_MODEL") || "openai/gpt-oss-120b" },
+].filter((p) => p.key);
+const AI_KEY = PROVIDERS.length ? "on" : "";
+const MODEL = PROVIDERS.map((p) => `${p.id}:${p.model}`).join(" → ");
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -80,18 +88,52 @@ Opcionalmente, después, hasta 2 propuestas de memoria (solo hechos estables y �
 Y si detectas riesgo para la seguridad de alguien añade: <riesgo>sí</riesgo>`;
 
 // ---------------------------------------------------------------------
-async function callModel(system: string, messages: { role: string; content: string }[], maxTokens = 1400) {
-  const r = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "x-api-key": AI_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages }),
-  });
-  if (!r.ok) {
-    const t = await r.text();
-    throw new Error(`ai_error ${r.status}: ${t.slice(0, 300)}`);
+async function callOne(p: any, system: string, messages: { role: string; content: string }[], maxTokens: number, json: boolean) {
+  if (p.id === "anthropic") {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": p.key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({ model: p.model, max_tokens: maxTokens, system, messages }),
+    });
+    if (!r.ok) throw new Error(`anthropic ${r.status}: ${(await r.text()).slice(0, 300)}`);
+    const d = await r.json();
+    return (d.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n").trim();
   }
+  if (p.id === "gemini") {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(p.model)}:generateContent`, {
+      method: "POST",
+      headers: { "x-goog-api-key": p.key, "content-type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
+        generationConfig: { maxOutputTokens: Math.max(maxTokens, 2048) * 2, temperature: 0.6, ...(json ? { responseMimeType: "application/json" } : {}) },
+      }),
+    });
+    if (!r.ok) throw new Error(`gemini ${r.status}: ${(await r.text()).slice(0, 300)}`);
+    const d = await r.json();
+    const text = (d.candidates?.[0]?.content?.parts || []).filter((x: any) => !x.thought).map((x: any) => x.text || "").join("").trim();
+    if (!text) throw new Error(`gemini empty: ${JSON.stringify(d.promptFeedback || d.candidates?.[0]?.finishReason || "")}`);
+    return text;
+  }
+  // groq (API compatible con OpenAI)
+  const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${p.key}`, "content-type": "application/json" },
+    body: JSON.stringify({ model: p.model, max_tokens: Math.max(maxTokens, 2048) * 2, temperature: 0.6,
+      messages: [{ role: "system", content: system }, ...messages], ...(json ? { response_format: { type: "json_object" } } : {}) }),
+  });
+  if (!r.ok) throw new Error(`groq ${r.status}: ${(await r.text()).slice(0, 300)}`);
   const d = await r.json();
-  return (d.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n").trim();
+  return String(d.choices?.[0]?.message?.content || "").trim();
+}
+
+async function callModel(system: string, messages: { role: string; content: string }[], maxTokens = 1400, json = false) {
+  let last: unknown = null;
+  for (const p of PROVIDERS) {
+    try { return await callOne(p, system, messages, maxTokens, json); }
+    catch (e) { console.error(e); last = e; }
+  }
+  throw last || new Error("no_provider");
 }
 
 function parseTagged(text: string) {
@@ -260,7 +302,7 @@ ${ctx.text}
 
 Responde SOLO con un JSON válido con esta forma (textos en español, listas de 0 a 5 elementos cortos):
 {"resumen":"", "hechos_observables":[], "perspectivas":[{"persona":"","interpretacion":"","emociones":[],"necesidades":[]}], "coincidencias":[], "diferencias_de_percepcion":[], "posibles_malentendidos":[], "necesidades_emocionales":[], "expectativas_no_comunicadas":[], "comportamientos_que_podrian_ajustarse":[], "posibles_soluciones":[], "informacion_faltante":[], "hipotesis_por_confirmar":[], "preguntas_para_conversar":[], "razonamiento":"", "riesgo":false, "nota_seguridad":""}`;
-      const raw = await callModel(system, [{ role: "user", content: vtext }], 2500);
+      const raw = await callModel(system, [{ role: "user", content: vtext }], 2500, true);
       const analysis = parseJSON(raw) || { resumen: raw.slice(0, 4000), razonamiento: "No se pudo estructurar el análisis." };
       analysis.perspectivas_incluidas = versions.length;
       analysis.riesgo = !!(analysis.riesgo || anyRisk);
@@ -287,7 +329,7 @@ ${ctx.text}
 
 Responde SOLO con JSON válido:
 {"resumen":"", "fortalezas":[{"texto":"","base":""}], "necesidades_individuales":[{"persona":"","necesidades":[]}], "diferencias":[{"tema":"","descripcion":"","tipo":"diferencia|hipotesis","base":""}], "estilos_de_comunicacion":[{"persona":"","descripcion":""}], "fuentes_de_conflicto":[{"texto":"","base":""}], "expectativas":[{"persona":"","texto":""}], "objetivos_compartidos":[], "hipotesis_por_confirmar":[], "sugerencias":[], "razonamiento":""}`;
-      const raw = await callModel(system, [{ role: "user", content: parts.join("\n\n") || "Sin respuestas autorizadas." }], 2500);
+      const raw = await callModel(system, [{ role: "user", content: parts.join("\n\n") || "Sin respuestas autorizadas." }], 2500, true);
       const profile = parseJSON(raw);
       if (!profile) return json({ error: "parse_failed" }, 500);
       profile.source = "ia";
@@ -310,7 +352,7 @@ ${ctx.text}
 
 Responde SOLO con JSON válido:
 {"actividades":[{"titulo":"","tipo":"preguntas|conversacion|gratitud|escucha|reconexion|futuro|necesidades","duracion":"","por_que":"","pasos":[],"preguntas":[]}]}`;
-      const raw = await callModel(system, [{ role: "user", content: "Propón las actividades." }], 2000);
+      const raw = await callModel(system, [{ role: "user", content: "Propón las actividades." }], 2000, true);
       const out = parseJSON(raw);
       const acts = (out?.actividades || []).slice(0, 3);
       const rows = acts.map((a: any) => ({ space_id: spaceId, created_by: user.id, activity_key: "ia", title: String(a.titulo || "Actividad").slice(0, 120), payload: a, status: "sugerida" }));
