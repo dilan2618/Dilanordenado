@@ -1,0 +1,11 @@
+{
+  "name": "OUR SPACE",
+  "short_name": "OUR SPACE",
+  "description": "Un espacio seguro para comprender, cuidar y construir una relación.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f6f0e6",
+  "theme_color": "#f6f0e6",
+  "lang": "es",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
