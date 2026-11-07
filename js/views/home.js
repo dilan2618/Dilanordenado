@@ -3,6 +3,7 @@ import { db } from '../db.js';
 import { S, memberView, nameOf } from '../store.js';
 import { viewGen, $, $$, esc, icon, avatar, sheet, closeSheet, toast, busy, friendlyError, together, plural, ago, nextYearly, today0, daysBetween, fmtD } from '../ui.js';
 import { GOALS, MOODS } from '../content.js';
+import { getAppearance, MOOD_EMOJI } from '../appearance.js';
 import { shareInvite } from './onboarding.js';
 import { go } from '../app.js';
 
@@ -17,9 +18,14 @@ export default async function (el) {
     if (!alive()) return;
     const me = memberView(S.me), partner = memberView(S.partner);
     const T = together(S.space.start_date);
+    const ap = getAppearance(S.me.settings), em = (k) => (ap.emojis ? MOOD_EMOJI[k] || '' : '');
     const hour = new Date().getHours(), hi = hour < 12 ? 'Buenos días' : hour < 19 ? 'Buenas tardes' : 'Buenas noches';
+    const hiEm = ap.emojis ? (hour < 12 ? ' ☀️' : hour < 19 ? ' 🌤️' : ' 🌙') : '';
+    const pName = ap.nickname || S.partner?.display_name || '';
+    const coverUrl = ap.hero === 'foto' && ap.cover ? S.avatars[ap.cover] : '';
+    const heroCls = ap.hero === 'suave' ? 'welcome soft' : coverUrl ? 'welcome photo' : 'card tint welcome';
     const lastOf = (uid) => checks.find((c) => c.user_id === uid);
-    const moodLabel = (k) => MOODS.find((m) => m.key === k)?.label || k;
+    const moodLabel = (k) => `${em(k) ? `<span class="mood-emoji">${em(k)}</span>` : ''}${esc(MOODS.find((m) => m.key === k)?.label || k)}`;
     const openTopics = topics.filter((t) => t.status !== 'resuelto');
     const myG = goals.filter((g) => g.user_id === db.uid).map((g) => g.goal), pG = goals.filter((g) => g.user_id !== db.uid).map((g) => g.goal);
     const sharedG = myG.filter((g) => pG.includes(g));
@@ -30,14 +36,14 @@ export default async function (el) {
       ...(S.space.start_date ? [{ t: 'Aniversario', e: '◦', d: nextYearly(S.space.start_date) }] : [])]
       .filter((x) => x.d >= today0()).map((x) => ({ ...x, n: daysBetween(today0(), x.d) })).sort((a, b) => a.n - b.n).slice(0, 3);
 
-    const moodBox = (m, c, mine) => `<div class="mood-box"><div class="row" style="gap:8px">${avatar(m, 'sm')}<span class="small"><b>${esc(m?.display_name || '')}</b></span></div>
-      ${c ? `<div class="w">${esc(moodLabel(c.mood))}</div><span class="tiny muted">${ago(c.created_at)}${mine && !c.shared ? ' · solo tú lo ves' : ''}</span>${c.note && (mine || c.shared) ? `<p class="small" style="margin-top:6px">“${esc(c.note)}”</p>` : ''}`
+    const moodBox = (m, c, mine) => `<div class="mood-box"><div class="row" style="gap:8px">${avatar(m, 'sm')}<span class="small"><b>${esc(mine ? 'Tú' : pName || m?.display_name || '')}</b></span></div>
+      ${c ? `<div class="w">${moodLabel(c.mood)}</div><span class="tiny muted">${ago(c.created_at)}${mine && !c.shared ? ' · solo tú lo ves' : ''}</span>${c.note && (mine || c.shared) ? `<p class="small" style="margin-top:6px">“${esc(c.note)}”</p>` : ''}`
       : `<div class="w" style="color:var(--gray-2)">—</div><span class="tiny muted">${mine ? 'Aún no lo has compartido' : 'Sin registro reciente'}</span>`}</div>`;
 
     el.innerHTML = `<div class="page">
-      <section class="card tint welcome">
+      <section class="card ${heroCls}" ${coverUrl ? `style="background-image:url('${coverUrl}')"` : ''}>
         <div class="row between"><span class="eyebrow" style="color:rgba(246,240,230,.7)">${esc(S.space.name || 'Nuestro espacio')}</span><span class="pair">${avatar(me, 'sm')}${partner ? avatar(partner, 'sm') : ''}</span></div>
-        <h1 style="margin-top:12px;font-size:1.9rem">${hi}, ${esc(S.me.display_name)}</h1>
+        <h1 style="margin-top:12px;font-size:1.9rem">${hi}, ${esc(S.me.display_name)}${hiEm}</h1>${pName ? `<p style="margin-top:4px">Tu espacio con ${esc(pName)}</p>` : ''}
         ${T ? `<div class="days serif">${T.total.toLocaleString('es')}</div><p>días juntos · ${T.y ? plural(T.y, 'año', 'años') + ', ' : ''}${plural(T.m, 'mes', 'meses')} y ${plural(T.d, 'día', 'días')}</p>` : `<p style="margin-top:8px">Añade la fecha en que empezó su relación en Ajustes.</p>`}
       </section>
 
@@ -95,9 +101,10 @@ export default async function (el) {
   }
 
   function checkinSheet() {
+    const ap = getAppearance(S.me.settings), em = (k) => (ap.emojis ? MOOD_EMOJI[k] || '' : '');
     let mood = null;
     sheet(`<h2>¿Cómo te sientes hoy?</h2><p class="muted small">Elige la palabra que más se acerque. No hay respuestas buenas o malas.</p>
-      <div class="chips" id="moods" style="margin:16px 0">${MOODS.map((m) => `<button class="chip" data-m="${m.key}">${esc(m.label)}</button>`).join('')}</div>
+      <div class="chips" id="moods" style="margin:16px 0">${MOODS.map((m) => `<button class="chip" data-m="${m.key}">${em(m.key) ? `<span class="em">${em(m.key)}</span>` : ''}${esc(m.label)}</button>`).join('')}</div>
       <div class="field"><label>¿Quieres añadir algo? <span class="muted">(opcional)</span></label><textarea class="textarea" id="note" maxlength="400" style="min-height:80px" placeholder="Ej: hoy necesito un poco de calma después del trabajo"></textarea></div>
       <label class="switch" style="margin-top:12px"><input type="checkbox" id="sh" checked/><div><b>Compartir con ${esc(S.partner?.display_name || 'mi pareja')}</b><span>Si lo desactivas, solo tú lo verás.</span></div></label>
       <div class="actions"><button class="btn ghost" data-close>Cancelar</button><button class="btn" id="save">Guardar</button></div>`, (b) => {

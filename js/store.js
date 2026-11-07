@@ -1,5 +1,6 @@
 // Estado global de la sesión
 import { db } from './db.js';
+import { applyAppearance, getAppearance } from './appearance.js';
 
 export const S = {
   session: null, space: null, members: [], me: null, partner: null,
@@ -12,8 +13,10 @@ export async function loadSpace() {
   S.space = r.space; S.members = r.members;
   S.me = r.members.find((m) => m.user_id === db.uid) || null;
   S.partner = r.members.find((m) => m.user_id !== db.uid) || null;
+  if (S.me) applyAppearance(getAppearance(S.me.settings));
   // avatares guardados como rutas privadas de Storage
-  const paths = r.members.map((m) => m.avatar_url).filter((p) => p && !p.startsWith('http'));
+  const cover = getAppearance(S.me?.settings).cover;
+  const paths = [...r.members.map((m) => m.avatar_url), cover].filter((p) => p && !p.startsWith('http'));
   if (paths.length) {
     try { const urls = await db.photoUrls(paths); paths.forEach((p, i) => (S.avatars[p] = urls[i])); } catch {}
   }

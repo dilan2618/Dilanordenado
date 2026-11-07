@@ -3,6 +3,7 @@ import { db } from '../db.js';
 import { S, loadSpace, aiStatus, memberView } from '../store.js';
 import { $, esc, icon, toast, busy, friendlyError, compressImage, avatar, confirmSheet, todayStr } from '../ui.js';
 import { REL_TYPES } from '../content.js';
+import { THEMES, getAppearance, applyAppearance } from '../appearance.js';
 import { importFromNR } from '../importnr.js';
 import { shareInvite } from './onboarding.js';
 import { refreshSpace } from '../app.js';
@@ -15,7 +16,9 @@ export default async function (el) {
   el.innerHTML = `<div class="page narrow">
     <div class="page-head"><span class="eyebrow">Privacidad y ajustes</span><h1>Tu cuenta, tus datos</h1><p>La privacidad es parte del diseño: aquí decides qué se usa, qué se comparte y qué se borra.</p></div>
 
-    <section class="card"><div class="card-head"><h3>Mi perfil</h3></div>
+    <section class="card" id="look"><div class="card-head"><h3>Apariencia</h3><span class="tiny muted">Solo cambia en tu cuenta</span></div><div id="lookBody"></div></section>
+
+    <section class="card" style="margin-top:16px"><div class="card-head"><h3>Mi perfil</h3></div>
       <div class="row" style="margin-bottom:16px"><span id="av">${avatar(memberView(S.me), 'lg')}</span><label class="btn soft sm" for="avf">Cambiar foto</label><input type="file" id="avf" accept="image/*" hidden/></div>
       <form id="pf" class="stack"><div class="two-col"><div class="field"><label>Nombre</label><input class="input" name="n" maxlength="40" value="${esc(S.me.display_name)}" required/></div>
         <div class="field"><label>Edad <span class="muted">(opcional)</span></label><input class="input" name="a" type="number" min="14" max="120" value="${S.me.age || ''}"/></div></div>
@@ -49,6 +52,44 @@ export default async function (el) {
     </div></section>
     <p class="center small" style="margin:24px 0"><a href="#/seguridad" class="muted" style="text-decoration:underline">Recursos de seguridad</a></p>
   </div>`;
+
+  // ---------- Apariencia ----------
+  let ap = getAppearance(S.me.settings);
+  const saveLook = async (patch, msg) => {
+    ap = { ...ap, ...patch }; applyAppearance(ap); drawLook();
+    try { S.me = await db.updateMe(sid, { settings: { ...(S.me.settings || {}), appearance: ap } }); if (msg) toast(msg); } catch (ex) { toast(friendlyError(ex)); }
+  };
+  function drawLook() {
+    const seg = (key, opts) => `<div class="seg" data-seg="${key}">${opts.map(([v, l]) => `<button data-v="${v}" class="${ap[key] === v ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+    $('#lookBody', el).innerHTML = `<div class="stack-lg">
+      <div><p class="label" style="margin-bottom:10px">Colores</p><div class="swatches">${Object.entries(THEMES).map(([k, t]) => `<button class="swatch ${ap.theme === k ? 'on' : ''}" data-theme="${k}">
+        <i style="background:linear-gradient(135deg,${t.v.wine} 0 50%,${t.v.terra} 50% 100%);${t.dark ? 'outline:2px solid #000;' : ''}"></i>${t.name}</button>`).join('')}</div></div>
+      <div class="field"><label>Tamaño del texto</label>${seg('size', [['normal', 'Normal'], ['grande', 'Grande'], ['extra', 'Muy grande']])}</div>
+      <div class="field"><label>Estilo de letra</label>${seg('type', [['elegante', '<span style="font-family:var(--serif)">Elegante</span>'], ['moderna', 'Moderna']])}</div>
+      <div class="field"><label>Portada del inicio</label>${seg('hero', [['degradado', 'Color'], ['suave', 'Suave'], ['foto', 'Foto']])}
+        ${ap.hero === 'foto' ? `<div class="row" style="margin-top:10px"><label class="btn soft sm" for="coverf">${icon('image')} ${ap.cover ? 'Cambiar foto' : 'Elegir foto'}</label><input type="file" id="coverf" accept="image/*" hidden/>
+          <span class="tiny muted">${ap.cover ? 'Foto lista ✓' : 'Una foto de ustedes queda genial'}</span></div>` : ''}</div>
+      <div class="field"><label>¿Cómo le dices a tu pareja? <span class="muted">(opcional)</span></label>
+        <div class="row"><input class="input" id="nick" maxlength="30" value="${esc(ap.nickname)}" placeholder="Ej: mi amor, Vale, gordi…"/><button class="btn soft sm" id="nickSave">Guardar</button></div>
+        <span class="hint">Se usa en tu pantalla de inicio. Tu pareja no lo ve.</span></div>
+      <label class="switch"><input type="checkbox" id="emo" ${ap.emojis ? 'checked' : ''}/><div><b>Emojis en estados y saludos</b><span>Un toque más cálido 🌿</span></div></label>
+      <label class="switch"><input type="checkbox" id="mot" ${ap.motion ? 'checked' : ''}/><div><b>Animaciones</b><span>Desactívalas si prefieres todo quieto.</span></div></label>
+      <div class="preview-mini"><span class="brand-mark" style="width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-family:var(--serif);font-style:italic">os</span>
+        <div class="grow"><b class="serif" style="font-size:1.05rem">Así se ve tu espacio</b><p class="tiny muted">Los cambios se aplican al instante.</p></div><span class="btn sm">Botón</span></div>
+    </div>`;
+    el.querySelectorAll('[data-theme]').forEach((b) => (b.onclick = () => saveLook({ theme: b.dataset.theme }, 'Colores guardados')));
+    el.querySelectorAll('[data-seg]').forEach((g) => g.querySelectorAll('button').forEach((b) => (b.onclick = () => saveLook({ [g.dataset.seg]: b.dataset.v }))));
+    $('#emo', el).onchange = (e) => saveLook({ emojis: e.target.checked });
+    $('#mot', el).onchange = (e) => saveLook({ motion: e.target.checked });
+    $('#nickSave', el).onclick = () => saveLook({ nickname: $('#nick', el).value.trim() }, 'Guardado');
+    const cf = $('#coverf', el);
+    if (cf) cf.onchange = async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      try { toast('Subiendo foto…'); const blob = await compressImage(f, 1600, 0.82); const path = await db.uploadPhoto(sid, blob, true);
+        await saveLook({ cover: path }); await loadSpace(); toast('Portada lista. Mírala en Inicio'); } catch (ex) { toast(friendlyError(ex)); }
+    };
+  }
+  drawLook();
 
   $('#avf', el).onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;

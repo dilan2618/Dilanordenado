@@ -1,6 +1,7 @@
 // =====================================================================
 // OUR SPACE · arranque, enrutador y estructura
 // =====================================================================
+import './appearance.js';
 import { db } from './db.js';
 import { S, loadSpace, onboardingDone, memberView } from './store.js';
 import { $, $$, esc, icon, avatar, sheet, closeSheet, toast, friendlyError } from './ui.js';

@@ -164,7 +164,7 @@ export const friendlyError = (e) => {
   const map = {
     invalid_code: 'Ese código de invitación no existe.', space_full: 'Ese espacio ya tiene dos integrantes.', already_in_space: 'Ya perteneces a un espacio.',
     name_required: 'Escribe tu nombre.', 'Invalid login credentials': 'Correo o contraseña incorrectos.', 'Email not confirmed': 'Confirma tu correo antes de entrar (revisa tu bandeja).',
-    'User already registered': 'Ese correo ya tiene cuenta. Inicia sesión.', 'Failed to fetch': 'No hay conexión. Revisa tu internet.',
+    'User already registered': 'Ese correo ya tiene cuenta. Inicia sesión.', 'row-level security': 'No se pudo guardar por permisos. Recarga la app e inténtalo de nuevo.', 'Failed to fetch': 'No hay conexión. Revisa tu internet.',
   };
   for (const k in map) if (m.includes(k)) return map[k];
   if (/Password should be at least/i.test(m)) return 'La contraseña debe tener al menos 6 caracteres.';

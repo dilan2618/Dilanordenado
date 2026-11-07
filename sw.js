@@ -1,8 +1,8 @@
 // Service worker: permite instalar OUR SPACE como app y abrirla rápido.
 // Solo guarda en caché los archivos de la app; los datos siempre vienen del servidor.
-const CACHE = 'ourspace-v2';
+const CACHE = 'ourspace-v3';
 const SHELL = ['./', 'index.html', 'css/app.css', 'icon.svg', 'manifest.webmanifest', 'js/app.js', 'js/db.js', 'js/ui.js', 'js/store.js', 'js/content.js',
-  'js/profile.js', 'js/render.js', 'js/config.js', 'js/safety.js', 'js/importnr.js'];
+  'js/profile.js', 'js/appearance.js', 'js/render.js', 'js/config.js', 'js/safety.js', 'js/importnr.js'];
 
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => {
